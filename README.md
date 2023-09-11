@@ -5,12 +5,11 @@
 **How will you be using VLM?**
 
 ### [Basic Features](https://docs.vlm.gg/#/decentraland/getting-started/basic-install.md)
--
-I don't need to control anything via code.
+- I don't need to control anything via code.
 
 ### [Advanced Features](https://docs.vlm.gg/#/decentraland/getting-started/advanced-install.md)
--
-I want to use the advanced user features that let me design complex scenes and implement my own controls. (Must enable Advanced User role on your VLM account.)
+
+- I want to use the advanced user features that let me design complex scenes and implement my own controls. (Must enable Advanced User role on your VLM account.)
 
 ---
 
