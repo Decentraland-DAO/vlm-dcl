@@ -12,6 +12,7 @@ import { VLMSound } from "./components/VLMSound.component";
 import { VLMNotificationManager } from "./logic";
 import { VLMEventManager } from "./logic/VLMSystemEvents.logic";
 import { VLMSceneInitEvent } from "./components/VLMSystemEvents.component";
+import { configurePaths } from "./shared/paths";
 
 /**
  * The main entry point for the VLM library.
@@ -34,23 +35,32 @@ export abstract class VLM {
   public static init: CallableFunction = async (config?: VLMInitConfig) => {
 
     return new Promise(async (resolve, reject) => {
-      try {
-        if (config?.widgets) {
-          await VLMWidgetManager.configureWidgets(config.widgets);
+      onSceneReadyObservable.addOnce(async () => {
+        try {
+          if (config?.modelFolder || config?.soundFolder) {
+            configurePaths({ modelFolder: config?.modelFolder, soundFolder: config?.soundFolder })
+          }
+          VLMEventManager.events.addListener(VLMSceneInitEvent, null, () => {
+            resolve(VLM.storage);
+          });
+          if (config?.widgets) {
+            await VLMWidgetManager.configureWidgets(config.widgets);
+          }
+          await VLMEnvironment.init(config?.env || "prod");
+          await VLMNotificationManager.init();
+          const session = await VLMSessionManager.start(VLM.version);
+          if (!session?.sceneRoom) {
+            log("VLM INIT ERROR: Failed to connect to the scene server. This may be due to a missing sceneId in the scene.json file.")
+            resolve({ error: "Failed to connect to the scene server. This may be due to a missing sceneId in the scene.json file." });
+            return;
+          }
+          await VLMEventListeners.init();
+        } catch (error) {
+          VLMLogManager.logError(error, { ...config, message: "VLM INIT ERROR", version: VLM.version, env: config?.env || "prod", });
+          reject(error);
         }
-        await VLMEnvironment.init(config?.env || "prod");
-        await VLMNotificationManager.init();
-        await VLMSessionManager.start(VLM.version);
-        await VLMEventListeners.init();
-        VLMEventManager.events.addListener(VLMSceneInitEvent, null, () => {
-          resolve(VLM.storage);
-        });
-      } catch (error) {
-        VLMLogManager.logError(error, { ...config, message: "VLM INIT ERROR", version: VLM.version, env: config?.env || "prod", });
-        reject(error);
-      }
+      });
     });
-
   };
 
   public static configureWidgets: CallableFunction = async (options: VLMWidget.DCLConfig[]) => {
@@ -135,4 +145,6 @@ export type VLMStorage = {
 type VLMInitConfig = {
   env: "dev" | "staging" | "prod";
   widgets?: VLMWidget.DCLConfig[];
+  modelFolder?: string;
+  soundFolder?: string;
 };

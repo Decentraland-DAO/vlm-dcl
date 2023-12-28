@@ -1,16 +1,15 @@
 import { VLMNotification } from "../components/VLMNotification.component";
 
 enum EMessageState {
-  HIDDEN,
-  FADING_IN,
-  FADING_OUT,
-  VISIBLE,
+  HIDDEN = "HIDDEN",
+  FADING_IN = "FADING_IN",
+  FADING_OUT = "FADING_OUT",
+  VISIBLE = "VISIBLE",
 }
 
 export abstract class VLMNotificationManager implements ISystem {
   static messageQueue: VLMNotification.Message[] = [];
   static initialized: boolean;
-  static running: boolean;
   static timer: number = 0;
   static state: EMessageState = EMessageState.HIDDEN;
   static delay: number = 1;
@@ -18,7 +17,7 @@ export abstract class VLMNotificationManager implements ISystem {
 
   static update(dt: number) {
     if (!this.messageQueue?.length) return;
-
+    
     const currentMessage = this.messageQueue[0];
 
     switch (this.state) {
@@ -28,7 +27,9 @@ export abstract class VLMNotificationManager implements ISystem {
 
       case EMessageState.VISIBLE:
         this.timer += dt;
-        if (this.timer >= this.delay) this.fadeOut();
+        if (this.timer >= this.delay) {
+          this.fadeOut();
+        }
         break;
 
       case EMessageState.FADING_IN:
@@ -37,7 +38,7 @@ export abstract class VLMNotificationManager implements ISystem {
           currentMessage.opacity = 1;
           this.state = EMessageState.VISIBLE;
           this.timer = 0;  // Reset the timer
-          this.delay = currentMessage.delay || 1;
+          this.delay = currentMessage.delay || 3;
         }
         break;
 

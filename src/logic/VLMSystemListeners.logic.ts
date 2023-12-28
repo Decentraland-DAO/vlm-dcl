@@ -1,4 +1,4 @@
-import { VLMPathClientEvent, VLMPathServerEvent, VLMSceneMessage, VLMSessionAction, VLMSessionEvent, VLMSoundStateEvent, VLMUserMessage, VLMVideoStatusEvent, VLMWidgetInitEvent, VLMWitnessedAction } from "../components/VLMSystemEvents.component";
+import { VLMClaimEvent, VLMEmoteAction, VLMPathClientEvent, VLMPathServerEvent, VLMSceneMessage, VLMSessionAction, VLMSessionEvent, VLMSettingsEvent, VLMSoundStateEvent, VLMUserMessage, VLMVideoStatusEvent, VLMWidgetInitEvent, VLMWitnessedAction } from "../components/VLMSystemEvents.component";
 import { VLMEventManager } from "./VLMSystemEvents.logic";
 import { Room } from "colyseus.js";
 import { VLMSceneManager } from "./VLMScene.logic";
@@ -9,6 +9,8 @@ import { VLMPathManager } from "./VLMPath.logic";
 import { VLMModerationManager, VLMNotificationManager, VLMSessionManager, VLMWidgetManager } from "./index";
 import { VLMVideo } from "../components/VLMVideo.component";
 import { VLMSound } from "../components/VLMSound.component";
+import { VLMClaimPointManager } from "./VLMClaimPoint.logic";
+import { VLMClaimPoint } from "../components";
 
 export abstract class VLMEventListeners {
   static inboundMessageFunctions: { [uuid: string]: CallableFunction } = {};
@@ -38,7 +40,7 @@ export abstract class VLMEventListeners {
             }
             engine.removeEntity(ent);
           });
-          ent.addComponent(delay);
+          ent.addComponentOrReplace(delay);
           engine.addEntity(ent);
         }
       });
@@ -96,6 +98,7 @@ export abstract class VLMEventListeners {
       onPlayerExpressionObservable.add(({ expressionId }) => {
         log(`VLM | SESSION ACTION: Emote triggered - ${expressionId}`);
         VLMEventManager.events.fireEvent(new VLMSessionAction("Emote Used", { emote: expressionId }));
+        VLMEventManager.events.fireEvent(new VLMEmoteAction(expressionId));
       });
 
       onPlayerClickedObservable.add((clickEvent) => {
@@ -151,19 +154,37 @@ export abstract class VLMEventListeners {
         }
       });
 
+      VLMEventManager.events.addListener(VLMSettingsEvent, null, (message) => {
+        VLMModerationManager.updateSettings(message.settingData.settingValue);
+      });
 
+
+      VLMEventManager.events.addListener(VLMClaimEvent, null, (message: VLMClaimEvent) => {
+        log("VLM - GIVEAWAY CLAIM - ", message)
+        if (message.action == "giveaway_claim") {
+          this.sceneRoom.send("giveaway_claim", { ...message, sessionToken: this.sessionData?.sessionToken, sceneId: this.sessionData?.sceneId });
+        } else if (message.action == "giveaway_claim_response") {
+          const claimPoint = VLMClaimPoint.configs[message.sk];
+          log(claimPoint)
+          if (claimPoint) {
+            claimPoint.requestInProgress = false;
+            VLMClaimPointManager.showMessage(message);
+          }
+        }
+      });
 
       VLMEventManager.events.addListener(VLMSessionAction, null, ({ action, metadata }) => {
         if (this.sessionData?.sessionToken) {
           let pathPoint = VLMPathManager.getPathPoint();
-          this.sceneRoom.send("session_action", { action, metadata, pathPoint, sessionToken: this.sessionData.sessionToken });
+          this.sceneRoom.send("session_action", { action, metadata, pathPoint, sessionToken: this.sessionData?.sessionToken });
           log("VLM - LOGGED ANALYTICS ACTION - ", action, pathPoint, metadata);
         }
       });
 
       VLMEventManager.events.addListener(VLMSoundStateEvent, null, ({ elementData, userId }) => {
         const id = elementData.sk;
-        log(userId, this.sessionUser, id, VLMSound.configs[id]);
+        log(id, VLMSound.configs[id]);
+        log("VLM - SOUND STATE CHANGED", userId, this.sessionUser.sk);
         if (userId == this.sessionUser.sk) {
           VLMSound.configs[id].toggleLocators();
         }
@@ -201,15 +222,16 @@ export abstract class VLMEventListeners {
         switch (message.action) {
           case "init":
             VLMSceneManager.initScenePreset(message);
+            log("VLM - SCENE INIT", message);
             break;
           case "create":
-            message.instance === true ? VLMSceneManager.createSceneElementInstance(message) : VLMSceneManager.createSceneElement(message);
+            VLMSceneManager.createSceneElement(message);
             break;
           case "update":
-            message.instance === true ? VLMSceneManager.updateSceneElementInstance(message) : VLMSceneManager.updateSceneElement(message);
+            VLMSceneManager.updateSceneElement(message);
             break;
           case "delete":
-            message.instance === true ? VLMSceneManager.deleteSceneElementInstance(message) : VLMSceneManager.deleteSceneElement(message);
+            VLMSceneManager.deleteSceneElement(message);
             break;
         }
       });
@@ -239,7 +261,11 @@ export abstract class VLMEventListeners {
       });
 
       this.sceneRoom.onMessage("session_started", (message: VLMSessionEvent) => {
+        log(message)
         this.sessionData = message.session;
+        this.sessionUser = message.user;
+        VLMSessionManager.sessionData = message.session;
+        VLMSessionManager.sessionUser = message.user;
         if (!this.sessionData?.sessionStart) {
           this.sessionData.sessionStart = Date.now();
         }
@@ -248,6 +274,12 @@ export abstract class VLMEventListeners {
 
       this.sceneRoom.onMessage("user_message", (message: VLMUserMessage) => {
         VLMEventManager.events.fireEvent(new VLMUserMessage(message));
+      });
+
+      this.sceneRoom.onMessage("analytics_user_joined", (message: VLMEmoteAction) => {
+        if (message.emote) {
+          VLMEventManager.events.fireEvent(new VLMEmoteAction(message.emote));
+        }
       });
 
       VLMEventManager.events.addListener(VLMUserMessage, null, async (message: VLMUserMessage) => {
@@ -289,13 +321,24 @@ export abstract class VLMEventListeners {
         VLMNotificationManager.addMessage(config.message, { ...config })
       });
 
-      this.sceneRoom.onMessage("scene_moderator_crash", (user: { walletAddress: string, displayName: string }) => {
+      this.sceneRoom.onMessage("scene_moderator_crash", (user: { connectedWallet: string, displayName: string }) => {
+        log("Crashing user", user)
         VLMModerationManager.setCrashUser(user);
       });
 
       this.sceneRoom.onMessage("scene_video_status", (message: VLMVideoStatusEvent) => {
         log("Video State Changed!", message);
         VLMEventManager.events.fireEvent(new VLMVideoStatusEvent(message));
+      });
+
+      this.sceneRoom.onMessage("scene_setting_update", (message: VLMSettingsEvent) => {
+        log("Scene Setting Updated!", message);
+        VLMEventManager.events.fireEvent(new VLMSettingsEvent(message));
+      });
+
+      this.sceneRoom.onMessage("giveaway_claim_response", (message: VLMClaimEvent) => {
+        log("Claim response received", message);
+        VLMEventManager.events.fireEvent(new VLMClaimEvent({ action: "giveaway_claim_response", ...message }));
       });
 
       this.sceneRoom.send("session_start", this.sessionData);
